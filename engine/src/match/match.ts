@@ -61,12 +61,13 @@ export class MatchRunner {
 
   private initializeRounds(config: MatchConfig): RoundState[] {
     const rounds: RoundState[] = [];
-    for (let i = 0; i < config.maxRounds; i++) {
+    // Create rounds until one player reaches roundsToWin (best-of-N)
+    for (let i = 0; i < config.roundsToWin * 2 - 1; i++) {
       rounds.push({
         id: `round-${i}`,
         index: i,
-        durationTicks: config.roundTimeSec * 20, // Convert seconds to ticks
-        timeLimitSec: config.roundTimeSec,
+        durationTicks: config.maxRoundTimeSec * 20, // Convert seconds to ticks
+        timeLimitSec: config.maxRoundTimeSec,
         state: 'pending'
       });
     }
@@ -107,7 +108,6 @@ export class MatchRunner {
     if (this.isRunning) return;
 
     this.isRunning = true;
-    this.match.matchState = 'warmup';
     
     // Load mode-specific module asynchronously
     this.modeModule = await this.loadModeModule(this.match.config.mode);
@@ -116,10 +116,7 @@ export class MatchRunner {
     const ctx = this.createContext();
     this.modeModule.initialize(ctx);
 
-    // Warmup period
-    await this.delay(this.match.config.warmupTimeSec * 1000);
-
-    // Start match loop
+    // Immediate start - skip warmup period
     this.match.matchState = 'in_progress';
     await this.runMatchLoop();
   }
@@ -156,11 +153,21 @@ export class MatchRunner {
       
       this.modeModule.onRoundEnd(ctx);
       
-      // Delay before next round
+      // Check if any player has reached roundsToWin (first to N wins)
+      const roundWinners = currentRound.winners || [];
+      const playerWins = this.calculatePlayerWins();
+      
+      const hasWinner = Object.values(playerWins).some(wins => wins >= this.match.config.roundsToWin);
+      
+      // Delay before next round or match end
       await this.delay(5000); // 5s scoreboard delay
       
       this.match.currentRoundIndex++;
-      if (this.match.currentRoundIndex < this.match.rounds.length) {
+      
+      if (hasWinner || this.match.currentRoundIndex >= this.match.rounds.length) {
+        // Match ended - either by reaching max rounds or a player winning
+        break;
+      } else {
         this.match.matchState = 'in_progress';
       }
     }
@@ -170,6 +177,23 @@ export class MatchRunner {
     const ctx = this.createContext();
     this.modeModule.onMatchEnd(ctx);
     this.isRunning = false;
+  }
+
+  private calculatePlayerWins(): Record<string, number> {
+    const wins: Record<string, number> = {};
+    for (const playerId of this.match.config.players) {
+      wins[playerId] = 0;
+    }
+    
+    for (const round of this.match.rounds) {
+      if (round.state === 'ended' && round.winners) {
+        for (const winnerId of round.winners) {
+          wins[winnerId] = (wins[winnerId] || 0) + 1;
+        }
+      }
+    }
+    
+    return wins;
   }
 
   private async runRoundLoop(): Promise<void> {
