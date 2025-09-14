@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend deps
+        working-directory: ./frontend
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: ./frontend
+        run: npx playwright install --with-deps
+      - name: Start frontend
+        working-directory: ./frontend
+        run: npm run dev &
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:3000 >/dev/null 2>&1; then
+              echo "server up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server did not start" && exit 1
+      - name: Run Playwright tests
+        working-directory: ./frontend
+        run: npm run test:e2e

@@ -28,12 +28,16 @@ export class MatchRunner {
   private emitCallback: (event: any) => void;
   private protocol: ReturnType<typeof createMatchProtocolHelpers>;
   private testMode: boolean;
+  private inputQueues: Map<string, Array<{ tick: number; input: any }>>;
+  private lastSnapshotTick: number = -1;
 
   constructor(config: MatchConfig, emit: (event: any) => void, startTime?: number, testMode: boolean = false) {
     this.world = createWorld(config.seed, { tickRate: 20 });
     this.prng = createPRNG(config.seed);
     this.emitCallback = emit;
     this.isRunning = false;
+    this.inputQueues = new Map();
+    this.lastSnapshotTick = -1;
 
     // Initialize match state with deterministic start time for testing
     this.match = {
@@ -51,6 +55,11 @@ export class MatchRunner {
 
     // Initialize protocol helpers
     this.protocol = createMatchProtocolHelpers(config.id, emit);
+
+    // Initialize input queues for all players
+    for (const playerId of config.players) {
+      this.inputQueues.set(playerId, []);
+    }
 
     // Mode module will be loaded asynchronously in start() method
     this.modeModule = null as any; // Temporary assignment, will be set in start()
@@ -224,8 +233,23 @@ export class MatchRunner {
   }
 
   private processTick(inputs: any[] = []): void {
-    // Advance world tick with provided inputs or empty
-    this.world.tick(inputs);
+    const currentTick = this.world.state.tick;
+    
+    // Collect inputs from queues for current tick
+    const tickInputs: any[] = [];
+    for (const [playerId, queue] of this.inputQueues) {
+      // Process all inputs up to current tick
+      while (queue.length > 0 && queue[0].tick <= currentTick) {
+        const { tick: inputTick, input } = queue.shift()!;
+        if (inputTick === currentTick) {
+          tickInputs.push({ ...input, clientId: playerId });
+        }
+        // Inputs for past ticks are discarded (late arrival)
+      }
+    }
+
+    // Advance world tick with collected inputs
+    this.world.tick(tickInputs.length > 0 ? tickInputs : []);
     
     // Update player states (time alive, etc.)
     this.updatePlayerStates();
@@ -233,6 +257,51 @@ export class MatchRunner {
     // Advance PRNG state
     this.world.state.rng = this.prng.getState();
     this.prng.next();
+
+    // Emit snapshot every 2 ticks (10Hz at 20Hz base rate)
+    if (currentTick % 2 === 0) {
+      this.emitSnapshot();
+    }
+  }
+
+  private emitSnapshot(): void {
+    const currentTick = this.world.state.tick;
+    if (currentTick === this.lastSnapshotTick) {
+      return; // Avoid duplicate snapshots
+    }
+
+    // Create minimal snapshot content
+    const snapshot = {
+      players: this.world.state.entities
+        .filter(e => e.type === 'player')
+        .map(player => ({
+          id: player.id,
+          x: player.x,
+          y: player.y,
+          hp: player.hp
+        })),
+      builds: this.world.state.entities
+        .filter(e => e.type === 'build_piece')
+        .map(build => ({
+          x: build.x,
+          y: build.y,
+          w: build.w,
+          h: build.h,
+          material: build.material,
+          hp: build.hp
+        })),
+      projectiles: this.world.state.entities
+        .filter(e => e.type === 'bullet')
+        .map(projectile => ({
+          x: projectile.x,
+          y: projectile.y,
+          vx: projectile.vx,
+          vy: projectile.vy
+        }))
+    };
+
+    this.protocol.emitSnapshot(currentTick, snapshot);
+    this.lastSnapshotTick = currentTick;
   }
 
   private updatePlayerStates(): void {
@@ -308,6 +377,29 @@ export class MatchRunner {
   // Public method for testing - get the internal world
   getWorld(): any {
     return this.world;
+  }
+
+  // Handle incoming input messages - enqueue for processing
+  handleInputMessage(message: any): void {
+    if (message.type !== 'input') {
+      // removed message type — ignored
+      return;
+    }
+
+    const playerId = message.clientId;
+    const queue = this.inputQueues.get(playerId);
+    if (!queue) {
+      // Player not in match - ignore input
+      return;
+    }
+
+    // Enqueue all actions from the input message
+    for (const action of message.actions) {
+      queue.push({ tick: action.t, input: action });
+    }
+
+    // Keep queue sorted by tick for deterministic processing
+    queue.sort((a, b) => a.tick - b.tick);
   }
 
   // Public method for testing - process one tick with inputs

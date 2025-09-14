@@ -1,0 +1,25 @@
+{
+  "exampleInput": {
+    "type": "input",
+    "clientId": "u-1",
+    "actions": [
+      {
+        "seq": 5012,
+        "t": 102345,
+        "move": [1, 0],
+        "shoot": 1,
+        "aim": [0.7, 0.3]
+      }
+    ]
+  },
+  "exampleSnapshot": {
+    "type": "snapshot",
+    "t": 102360,
+    "entities": [
+      { "id": "u-1", "x": 1024, "y": 512, "vx": 10, "vy": 0, "hp": 85 },
+      { "id": "u-2", "x": 980, "y": 540, "vx": -5, "vy": 0, "hp": 100 }
+    ]
+  },
+  "exampleInputString": "{\"type\":\"input\",\"clientId\":\"u-1\",\"actions\":[{\"seq\":5012,\"t\":102345,\"move\":[1,0],\"shoot\":1,\"aim\":[0.7,0.3]}]}",
+  "exampleSnapshotString": "{\"type\":\"snapshot\",\"t\":102360,\"entities\":[{\"id\":\"u-1\",\"x\":1024,\"y\":512,\"vx\":10,\"vy\":0,\"hp\":85},{\"id\":\"u-2\",\"x\":980,\"y\":540,\"vx\":-5,\"vy\":0,\"hp\":100}]}"
+}
